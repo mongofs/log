@@ -1,5 +1,6 @@
 package log
 
+
 import (
 	"fmt"
 	"os"
@@ -22,12 +23,11 @@ func New(name string, debug bool) *mylog {
 		name:  name,
 		debug: debug,
 	}
-	_ = l.open()
-
+	l.init()
 	return l
 }
 
-func (log *mylog) open() error {
+func (log *mylog) init()  {
 	encoderConfig := zapcore.EncoderConfig{
 		TimeKey:        "time",
 		LevelKey:       "level",
@@ -45,113 +45,79 @@ func (log *mylog) open() error {
 
 	// 设置日志级别
 	cores := []zapcore.Core{}
-
-	//设置info waring和error的日志
 	infoLevel := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
 		return lvl == zapcore.InfoLevel
 	})
-
 	waringLevel := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
 		return lvl == zapcore.WarnLevel
 	})
-
 	errorLevel := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
 		return lvl == zapcore.ErrorLevel
 	})
-
-	//debug为ture  日志输出到终端
 	if log.debug {
 		//debug 直接输出到终端中
-		cores = append(cores, zapcore.NewCore(
-			zapcore.NewJSONEncoder(encoderConfig),
-			zapcore.NewMultiWriteSyncer(
-				zapcore.AddSync(os.Stdout)),
-			infoLevel))
-		cores = append(cores, zapcore.NewCore(
-			zapcore.NewJSONEncoder(encoderConfig),
-			zapcore.NewMultiWriteSyncer(
-				zapcore.AddSync(os.Stdout)),
-			waringLevel))
-		cores = append(cores, zapcore.NewCore(
-			zapcore.NewJSONEncoder(encoderConfig),
-			zapcore.NewMultiWriteSyncer(
-				zapcore.AddSync(os.Stdout)),
-			errorLevel))
-
+		cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderConfig), zapcore.NewMultiWriteSyncer(zapcore.AddSync(os.Stdout)), infoLevel))
+		cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderConfig), zapcore.NewMultiWriteSyncer(zapcore.AddSync(os.Stdout)), waringLevel))
+		cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderConfig), zapcore.NewMultiWriteSyncer(zapcore.AddSync(os.Stdout)), errorLevel))
 	} else {
 		// 获取 info、error日志文件的io.Writer 抽象 getWriter() 在下方实现
 		infoWriter := getWriter(log.name + "_info.log")
 		waringWriter := getWriter(log.name + "_waring.log")
 		errorWriter := getWriter(log.name + "_error.log")
-		cores = append(cores, zapcore.NewCore(
-			zapcore.NewJSONEncoder(encoderConfig),
-			zapcore.NewMultiWriteSyncer(
-				zapcore.AddSync(&infoWriter)),
-			infoLevel))
-
-		cores = append(cores, zapcore.NewCore(
-			zapcore.NewJSONEncoder(encoderConfig),
-			zapcore.NewMultiWriteSyncer(
-				zapcore.AddSync(&waringWriter)),
-			waringLevel))
-		cores = append(cores, zapcore.NewCore(
-			zapcore.NewJSONEncoder(encoderConfig),
-			zapcore.NewMultiWriteSyncer(
-				zapcore.AddSync(&errorWriter)),
-			errorLevel))
+		cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderConfig), zapcore.NewMultiWriteSyncer(zapcore.AddSync(&infoWriter)), infoLevel))
+		cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderConfig), zapcore.NewMultiWriteSyncer(zapcore.AddSync(&waringWriter)), waringLevel))
+		cores = append(cores, zapcore.NewCore(zapcore.NewJSONEncoder(encoderConfig), zapcore.NewMultiWriteSyncer(zapcore.AddSync(&errorWriter)), errorLevel))
 	}
 
 	// 最后创建具体的Logger
-	core := zapcore.NewTee(
-		cores...,
-	)
-	// 开启开发模式，堆栈跟踪
-	caller := zap.AddCaller()
-	// 开启文件及行号
+	core := zapcore.NewTee(cores..., )
+	//caller := zap.AddCaller()
 	development := zap.Development()
-
-
-
-	// 构造日志
-	logger := zap.New(core, caller, development)
-
+	logger := zap.New(core, development)
 	log.Logger = logger
-	return nil
 }
 
 
 func (log *mylog) Close() error {
-	return log.Close()
+	return nil
 }
 
 
-func (log *mylog) MError(err error){
+func (log *mylog) MError(err error,opt ...option){
 	if err == nil {return }
 	res,causeLine := log.split(err)
-	sugar := log.Sugar()
-	sugar.Errorw(err.Error(),
-		"app_id",log.name,
-		"err_line", causeLine,
-		"err_stack",res,
-	)
+	register := &Option{}
+	for _,o := range opt{
+		o(register)
+	}
+	var fileds [] zap.Field
+	fileds = append(fileds,register.registerOption(log)...)
+	fileds = append(fileds,zap.String("app_name",log.name), zap.String("err_line",causeLine), zap.Any("err_stack",res))
+	log.Error(err.Error(), fileds...)
 }
 
-func (log *mylog) MInfo(info string){
-	sugar := log.Sugar()
-	sugar.Infow(info,
-		"app_id",log.name,
-	)
+
+
+func (log *mylog) MInfo(info string,opt ...option){
+	register := &Option{}
+	for _,o := range opt{
+		o(register)
+	}
+	var fileds [] zap.Field
+	fileds = append(fileds,register.registerOption(log)...)
+	fileds = append(fileds,zap.String("app_name",log.name))
+	log.Info(info, fileds...)
 }
 
 
 
 func (log *mylog)split(err error) ([]string ,string/*cause line*/){
-	str := fmt.Sprintf("n%+v",err)
+	str := fmt.Sprintf("%+v",err)
 	tem:= strings.Split(str,"\n")
 	temCause :="can't get error stack "
 	for i:=0;i<len(tem);i++ {
 		if i ==0 {
-			tem[i] = "error ："+tem[i]
+			tem[i] = "ERR_REASON ："+tem[i]
 		}
 		if i== 2 {
 			temCause = tem[i]
@@ -174,3 +140,4 @@ func getWriter(filename string) lumberjack.Logger {
 		Compress:   true,     // 是否压缩
 	}
 }
+
