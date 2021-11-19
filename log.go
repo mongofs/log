@@ -71,9 +71,9 @@ func (log *mylog) init()  {
 
 	// 最后创建具体的Logger
 	core := zapcore.NewTee(cores..., )
-	//caller := zap.AddCaller()
+	caller := zap.AddCaller()
 	development := zap.Development()
-	logger := zap.New(core, development)
+	logger := zap.New(core, caller,development)
 	log.Logger = logger
 }
 
